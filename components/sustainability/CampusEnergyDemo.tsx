@@ -7,7 +7,7 @@ import { campusAnalytics, energyOpportunities, equipmentEnergy, generateSyntheti
 const number = (value:number, digits=1) => value.toLocaleString(undefined,{maximumFractionDigits:digits});
 const categoryLabels:Record<string,string>={lighting:"Lighting",fans:"Fans",cooling:"Air conditioning",computers:"Computers & monitors",network:"Networking",av:"Audio visual",lab_equipment:"Laboratory equipment",motors:"Motors & machines",ventilation:"Ventilation",office_equipment:"Office equipment",essential_infrastructure:"Essential infrastructure"};
 
-export default function CampusEnergyDemo({role}:{role:string}) {
+export default function CampusEnergyDemo({role}:{role?:string}) {
   const [buildingId,setBuildingId]=useState("");
   const [floorId,setFloorId]=useState("");
   const [roomId,setRoomId]=useState("");
@@ -49,7 +49,7 @@ export default function CampusEnergyDemo({role}:{role:string}) {
 
   return <section className="energy-demo" aria-labelledby="energy-demo-title">
     <div className="energy-demo-banner"><strong>DEMO DATA · SIMULATED CAMPUS MODEL</strong><span>Equipment, timetable, occupancy and energy are synthetic examples. These are not measured electricity readings.</span></div>
-    <header className="energy-demo-heading"><div><p className="eyebrow">CAMPUS ENERGY · DIGITAL TWIN MODEL</p><h2 id="energy-demo-title">Estimated campus energy</h2><p>Explore the linked room inventory, operating schedule and explainable energy estimates.</p></div><Link href={`/workspace/${role}/twin`} className="button button-outline">Open Digital Twin →</Link></header>
+    <header className="energy-demo-heading"><div><p className="eyebrow">CAMPUS ENERGY · DIGITAL TWIN MODEL</p><h2 id="energy-demo-title">Estimated campus energy</h2><p>Explore the linked room inventory, operating schedule and explainable energy estimates.</p></div>{role && <Link href={`/workspace/${role}/twin`} className="button button-outline">Open Digital Twin →</Link>}</header>
     <div className="energy-period-tabs" role="group" aria-label="Energy period">{[{days:1,label:"Daily"},{days:7,label:"Weekly"},{days:30,label:"Monthly"}].map(item=><button key={item.days} type="button" className={days===item.days?"selected":""} onClick={()=>setDays(item.days)} aria-pressed={days===item.days}>{item.label}</button>)}</div>
     <div className="energy-kpis">
       <EnergyKpi title={`${daysLabel} estimated consumption`} value={`${number(analytics.totalKWh)} kWh`} note="Calculated from equipment schedules and load factors"/>

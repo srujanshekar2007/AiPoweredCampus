@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient, hasSupabaseConfig } from "@/lib/supabase/client";
 
@@ -27,6 +28,10 @@ export default function LoginForm({ authError = "" }: { authError?: string }) {
   return <>
     <div className={`auth-notice ${configured ? "auth-ready" : ""}`} role="status"><span className="notice-icon">i</span><span>{configured ? "Sign-in uses the campus Supabase identity provider. New accounts require profile verification before workspace access." : "Campus sign-in is unavailable. Add Supabase project values and configure Google OAuth or campus email accounts."}</span></div>
     {notice && <div className="auth-notice" role="alert"><span className="notice-icon">!</span><span>{notice}</span></div>}
+    <div className="login-explore-entry">
+      <Link className="button button-primary button-full" href="/demo/student">Explore Demo <span aria-hidden="true">→</span></Link>
+      <p>Explore the campus sustainability dashboard without creating an account.</p>
+    </div>
     <button className="button button-outline button-full" type="button" disabled={busy} onClick={() => void signIn("google")}><span className="google-g">G</span> Continue with Google</button>
     <div className="divider"><span>or use your college email</span></div>
     <form className="login-form" onSubmit={(event) => { event.preventDefault(); void signIn("password"); }}>

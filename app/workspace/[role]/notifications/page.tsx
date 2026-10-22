@@ -9,8 +9,10 @@ const allowedRoles = new Set(["student", "worker", "admin"]);
 export default async function NotificationsPage({ params }: PageProps<"/workspace/[role]/notifications">) {
   const { role } = await params;
   if (!allowedRoles.has(role)) notFound();
-  const { issues, auditLog } = await getCampusData();
-  const identity = await getAuthenticatedIdentity();
+  const [{ issues, auditLog }, identity] = await Promise.all([
+    getCampusData(),
+    getAuthenticatedIdentity(),
+  ]);
   if (!identity || identity.role !== role) redirect("/login?error=workspace_access_denied");
   const visibleIssues = role === "admin" ? issues : role === "worker"
     ? issues.filter((issue) => issue.assigneeId === identity.id)

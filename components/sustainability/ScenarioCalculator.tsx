@@ -28,7 +28,8 @@ type Reading = {
   recordedAt: string;
   readingType: string;
 };
-type PageResult = { period: Period; data: Summary | null; readings: Reading[]; error: string };
+export type SustainabilityPageResult = { period: Period; data: Summary | null; readings: Reading[]; error: string };
+type PageResult = SustainabilityPageResult;
 
 const PAGE_SIZE = 25;
 const NO_READINGS: Reading[] = [];
@@ -40,7 +41,7 @@ const comparisonMetrics = [
   { key: "wasteDiverted", title: "Waste diverted", unit: "kg" },
 ] as const;
 
-export default function ScenarioCalculator({ role }: { role: string }) {
+export default function ScenarioCalculator({ role, demo = false, demoResult, embedded = false }: { role: string; demo?: boolean; demoResult?: SustainabilityPageResult; embedded?: boolean }) {
   const [period, setPeriod] = useState<Period>("today");
   const [result, setResult] = useState<PageResult | null>(null);
   const [page, setPage] = useState(0);
@@ -48,6 +49,7 @@ export default function ScenarioCalculator({ role }: { role: string }) {
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
+    if (demo) return;
     let cancelled = false;
     fetch(`/api/sustainability?period=${period}`, { cache: "no-store", signal: AbortSignal.timeout(15_000) })
       .then(async (response) => {
@@ -72,9 +74,11 @@ export default function ScenarioCalculator({ role }: { role: string }) {
         if (!cancelled) setResult({ period, data: null, readings: [], error: cause instanceof DOMException && cause.name === "TimeoutError" ? "The sustainability request timed out. Please retry." : cause instanceof Error ? cause.message : "Sustainability data could not be loaded." });
       });
     return () => { cancelled = true; };
-  }, [period, reloadToken]);
+  }, [demo, demoResult, period, reloadToken]);
 
-  const current = result?.period === period ? result : null;
+  const current = demo
+    ? demoResult ? { ...demoResult, period, data: demoResult.data ? { ...demoResult.data, period } : null } : { period, data: null, readings: [], error: "Demo sample data is unavailable." }
+    : result?.period === period ? result : null;
   const data = current?.data ?? null;
   const readings = current?.readings ?? NO_READINGS;
   const error = current?.error ?? "";
@@ -88,14 +92,15 @@ export default function ScenarioCalculator({ role }: { role: string }) {
     .slice(0, 14)
     .reverse();
 
+  const PageContainer = embedded ? "section" : "main";
   return (
-    <main className="sustainability-page">
-      <Link className="back-link" href={`/workspace/${role}`}>← Workspace</Link>
-      <CampusEnergyDemo role={role}/>
+    <PageContainer className={`sustainability-page${embedded ? " demo-sustainability-embedded" : ""}`}>
+      {!embedded && <Link className="back-link" href={`/workspace/${role}`}>← Workspace</Link>}
+      <CampusEnergyDemo role={demo ? undefined : role}/>
       <header>
-        <p className="eyebrow">SUSTAINABILITY · MEASURED CAMPUS DATA</p>
+        <p className="eyebrow">{demo ? "DEMO · SAMPLE CAMPUS DATA" : "SUSTAINABILITY · MEASURED CAMPUS DATA"}</p>
         <h1>Campus resource dashboard</h1>
-        <p>Measured Supabase sensor data, period comparisons, and recent device readings.</p>
+        <p>{demo ? "Explore example resource totals, comparisons, waste diversion, and sample device readings." : "Measured Supabase sensor data, period comparisons, and recent device readings."}</p>
       </header>
 
       <div className="period-tabs" role="group" aria-label="Reporting period">
@@ -117,8 +122,8 @@ export default function ScenarioCalculator({ role }: { role: string }) {
 
         <section className="panel glass-panel sustainability-dataset">
           <div className="panel-heading">
-            <div><p className="eyebrow">SUPABASE · SENSOR DATASET</p><h2>Imported sensor readings</h2>
-              <p className="muted">Showing {readings.length ? `${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, readings.length)} of ` : ""}{readings.length.toLocaleString()} newest readings loaded (up to 10,000).</p>
+            <div><p className="eyebrow">{demo ? "DEMO · SAMPLE SENSOR DATASET" : "SUPABASE · SENSOR DATASET"}</p><h2>{demo ? "Sample sensor readings" : "Imported sensor readings"}</h2>
+              <p className="muted">Showing {readings.length ? `${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, readings.length)} of ` : ""}{readings.length.toLocaleString()}{demo ? " fictional readings." : " newest readings loaded (up to 10,000)."}</p>
             </div>
             <span className="dataset-count">{readings.length.toLocaleString()} rows</span>
           </div>
@@ -146,7 +151,7 @@ export default function ScenarioCalculator({ role }: { role: string }) {
 
         <p className="muted small">Campus time zone: {data.timezone}. {period === "all" ? `Totals include all returned readings through ${new Date(data.end).toLocaleString()}.` : `${titles[period]} window: ${new Date(data.start).toLocaleString()} – ${new Date(data.end).toLocaleString()}. Comparison uses the matching elapsed time in the previous period.`}</p>
       </>}
-    </main>
+    </PageContainer>
   );
 }
 

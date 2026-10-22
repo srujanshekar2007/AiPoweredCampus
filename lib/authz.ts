@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 
 export type CampusRole = "student" | "worker" | "admin";
@@ -5,14 +6,14 @@ export function authConfigured() { return Boolean(process.env.NEXT_PUBLIC_SUPABA
 export type SignedInUser = { id: string; email: string; name: string; metadataRole: CampusRole | null };
 function toRole(value: unknown): CampusRole | null { return value === "student" || value === "worker" || value === "admin" ? value : null; }
 
-export async function getSignedInUser(): Promise<SignedInUser | null> {
+export const getSignedInUser = cache(async function getSignedInUser(): Promise<SignedInUser | null> {
   if (!authConfigured()) return null;
   const supabase = await createClient(); const { data, error } = await supabase.auth.getUser();
   if (error || !data.user) return null;
   return { id: data.user.id, email: data.user.email ?? "", name: data.user.app_metadata.name ?? data.user.user_metadata.full_name ?? data.user.email ?? "Campus user", metadataRole: toRole(data.user.app_metadata.role) };
-}
+});
 
-export async function getAuthenticatedIdentity(): Promise<{ role: CampusRole; id: string; email: string; name: string } | null> {
+export const getAuthenticatedIdentity = cache(async function getAuthenticatedIdentity(): Promise<{ role: CampusRole; id: string; email: string; name: string } | null> {
   const user = await getSignedInUser();
   if (!user) return null;
   const supabase = await createClient();
@@ -23,7 +24,7 @@ export async function getAuthenticatedIdentity(): Promise<{ role: CampusRole; id
   // Existing, trusted role claims remain valid during migration; new OAuth users have no app_metadata role.
   if (!profile && user.metadataRole) return { id: user.id, email: user.email, name: user.name, role: user.metadataRole };
   return null;
-}
+});
 export async function getAuthenticatedRole(): Promise<CampusRole | null> { return (await getAuthenticatedIdentity())?.role ?? null; }
 
 export async function getTrustedAdminUser(): Promise<SignedInUser | null> {

@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { AuditEvent, CampusIssue, SensorReading } from "@/lib/campus-store";
 import { createClient } from "@/lib/supabase/client";
 import { useNotificationReadThrough } from "@/components/notifications/useNotificationReadState";
@@ -14,6 +15,7 @@ import IssueCameraCapture from "@/components/layout/IssueCameraCapture";
 import type { TwinData } from "@/components/twin/types";
 import type { TwinLocationSelection } from "@/components/twin/types";
 import { submitIssueReport } from "@/lib/issue-report-client";
+import type { DemoWorkspaceData } from "@/lib/demo-data";
 
 type Role = "student" | "worker" | "admin";
 const navs: Record<Role, string[]> = {
@@ -25,12 +27,13 @@ const navRoutes: Record<string, string> = { "EcoTwin Help": "assistant", Sustain
 const titleOf = (issue: CampusIssue) => issue.title;
 const statusLabel: Record<CampusIssue["status"], string> = { open: "Needs review", assigned: "Assigned", in_progress: "In progress", resolved: "Resolved · awaiting review", verified: "Verified" };
 
-export function AppShell({ role, identity, twinData, geometryUnavailable }: { role: Role; identity: { id: string; name: string; email: string }; twinData: TwinData; geometryUnavailable: boolean }) {
+export function AppShell({ role, identity, twinData, geometryUnavailable, demo = false, demoData, demoContent, demoActiveLabel = "Overview" }: { role: Role; identity: { id: string; name: string; email: string }; twinData: TwinData; geometryUnavailable: boolean; demo?: boolean; demoData?: DemoWorkspaceData; demoContent?: ReactNode; demoActiveLabel?: string }) {
   const router = useRouter();
-  const name = identity.name; const [active, setActive] = useState("Overview");
-  const [issues, setIssues] = useState<CampusIssue[]>([]); const [auditLog, setAuditLog] = useState<AuditEvent[]>([]); const [auditLogAvailable, setAuditLogAvailable] = useState(true); const [readings, setReadings] = useState<SensorReading[]>([]); const [sensors, setSensors] = useState<{ id: string; name: string; icon: string; status: string; latest: SensorReading | null }[]>([]); const [workers, setWorkers] = useState<{userId:string;fullName:string;campusId:string}[]>([]);
-  const [loading, setLoading] = useState(true); const [error, setError] = useState(""); const [sensorError, setSensorError] = useState(""); const [reportOpen, setReportOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false); const [mobileOpen, setMobileOpen] = useState(false); const [dark, setDark] = useState(false); const [assistantOpen, setAssistantOpen] = useState(true);
+  const name = identity.name; const [active, setActive] = useState(demoActiveLabel);
+  const [issues, setIssues] = useState<CampusIssue[]>(demoData?.issues ?? []); const [auditLog, setAuditLog] = useState<AuditEvent[]>(demoData?.auditLog ?? []); const [auditLogAvailable, setAuditLogAvailable] = useState(true); const [readings, setReadings] = useState<SensorReading[]>(demoData?.readings ?? []); const [sensors, setSensors] = useState<{ id: string; name: string; icon: string; status: string; latest: SensorReading | null }[]>(demoData?.sensors ?? []); const [workers, setWorkers] = useState<{userId:string;fullName:string;campusId:string}[]>(demoData?.workers ?? []);
+  const [loading, setLoading] = useState(!demo); const [error, setError] = useState(""); const [sensorError, setSensorError] = useState(demo ? "Sample readings shown · DEMO MODE" : ""); const [reportOpen, setReportOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false); const [mobileOpen, setMobileOpen] = useState(false); const [dark, setDark] = useState(false); const [assistantOpen, setAssistantOpen] = useState(!demo);
+  const routePrefix = demo ? `/demo/${role}` : `/workspace/${role}`;
   const [form, setForm] = useState({ title: "", description: "", category: "Water", location: "", locationSelection: null as Omit<TwinLocationSelection, "location"> | null, priority: "medium" });
   const [reportStep, setReportStep] = useState<"photo" | "review">("photo");
   const [photoDataUrl, setPhotoDataUrl] = useState("");
@@ -43,33 +46,48 @@ export function AppShell({ role, identity, twinData, geometryUnavailable }: { ro
   const [reportSubmitNotice, setReportSubmitNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
   
   const reload = useCallback(async () => {
+    if (demo) { setLoading(false); return; }
     try {
-      const response = await fetch("/api/campus", { cache: "no-store" }); const text = await response.text();
+      const [response, sensorResponse, workerResponse] = await Promise.all([
+        fetch("/api/campus", { cache: "no-store" }),
+        role === "worker" || role === "admin"
+          ? fetch("/api/sensors", { cache: "no-store" })
+          : Promise.resolve(null),
+        role === "admin"
+          ? fetch("/api/admin/workers", { cache: "no-store" })
+          : Promise.resolve(null),
+      ]);
+      const text = await response.text();
       let data: { error?: string; issues?: CampusIssue[]; auditLog?: AuditEvent[]; auditLogAvailable?: boolean };
       try { data = JSON.parse(text); } catch { throw new Error(`Campus data service returned an unreadable response (HTTP ${response.status}).`); }
       if (!response.ok) throw new Error(data.error ?? `Campus data service failed (HTTP ${response.status}).`);
       setIssues(data.issues ?? []); setAuditLog(data.auditLog ?? []); setAuditLogAvailable(data.auditLogAvailable !== false); setError("");
-      if (role === "worker" || role === "admin") {
-        const sensorResponse = await fetch("/api/sensors", { cache: "no-store" }); const sensorText = await sensorResponse.text();
+      if (sensorResponse) {
+        const sensorText = await sensorResponse.text();
         let sensorData: { error?: string; sensors?: typeof sensors; readings?: SensorReading[] };
         try { sensorData = JSON.parse(sensorText); } catch { throw new Error(`Sensor service returned an unreadable response (HTTP ${sensorResponse.status}).`); }
         if (!sensorResponse.ok) { setSensorError(sensorData.error ?? `Sensor service failed (HTTP ${sensorResponse.status}).`); setSensors([]); setReadings([]); }
         else { setSensors(sensorData.sensors ?? []); setReadings(sensorData.readings ?? []); setSensorError(""); }
       } else { setSensors([]); setReadings([]); }
-      if (role === "admin") { try { const wr = await fetch("/api/admin/workers", {cache:"no-store"}); const wt=await wr.text(); const wd=JSON.parse(wt); if(!wr.ok) throw new Error(wd.error ?? "Verified worker list could not be loaded."); setWorkers(wd.workers ?? []); } catch { setWorkers([]); } }
+      if (workerResponse) { try { const wt=await workerResponse.text(); const wd=JSON.parse(wt); if(!workerResponse.ok) throw new Error(wd.error ?? "Verified worker list could not be loaded."); setWorkers(wd.workers ?? []); } catch { setWorkers([]); } }
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Campus data service is unavailable. Check authentication and database configuration."); }
     finally { setLoading(false); }
-  }, [role]);
+  }, [role, demo]);
 
-  useEffect(() => { void Promise.resolve().then(() => { setDark(localStorage.getItem("ecotwin-theme") === "dark"); return reload(); }); }, [reload]);
+  useEffect(() => {
+    void Promise.resolve().then(() => {
+      setDark(localStorage.getItem(demo ? "ecotwin-demo-theme" : "ecotwin-theme") === "dark");
+      if (!demo) return reload();
+    });
+  }, [reload, demo]);
   
   useEffect(() => {
-    if (role !== "worker") return;
+    if (demo || role !== "worker") return;
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void reload();
     }, 15_000);
     return () => window.clearInterval(timer);
-  }, [role, reload]);
+  }, [role, reload, demo]);
 
   const visibleIssues = useMemo(() => issues, [issues]);
   const notificationScope = identity.id;
@@ -79,12 +97,25 @@ export function AppShell({ role, identity, twinData, geometryUnavailable }: { ro
   const unreadNotifications = countUnreadNotifications(visibleNotifications, readThrough);
   
   const updateIssue = async (id: string, patch: Record<string, unknown>) => { 
+    if (demo) {
+      setIssues((current) => current.map((issue) => issue.id === id ? { ...issue, ...(patch as Partial<CampusIssue>), updatedAt: new Date().toISOString() } : issue));
+      return;
+    }
     const response = await fetch(`/api/campus/issues/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }); 
     if (!response.ok) { const body = await response.json().catch(() => ({})); setError(body.error ?? `Issue update failed (HTTP ${response.status}).`); return; } 
     await reload(); 
   };
 
-  const signOut = async () => { await createClient().auth.signOut(); router.push("/login"); router.refresh(); };
+  const signOut = async () => { if (!demo) await createClient().auth.signOut(); router.replace("/login"); };
+
+  const submitDemoIssue = (values: { title: string; description: string; category: string; location: string; priority: CampusIssue["priority"] }) => {
+    const createdAt = new Date().toISOString();
+    const issue: CampusIssue = { id: `DEMO-${Date.now().toString().slice(-6)}`, ...values, status: "open", reporter: name, reporterId: identity.id, assignee: null, assigneeId: null, createdAt, updatedAt: createdAt, evidence: [], source: "user" };
+    setIssues((current) => [issue, ...current]);
+    setReportSubmitNotice({ type: "success", message: "Demo report preview added locally. It was not sent or saved." });
+    setReportOpen(false);
+    setActive(role === "student" ? "My Reports" : role === "worker" ? "My Tasks" : "All Issues");
+  };
   
   const resetReportWizard = () => {
     setForm({ title: "", description: "", category: "Water", location: "", locationSelection: null, priority: "medium" });
@@ -161,9 +192,12 @@ export function AppShell({ role, identity, twinData, geometryUnavailable }: { ro
           <span className="topbar-divider"/><span className="campus-name">Campus operations</span>
         </div>
         <div className="topbar-actions">
+          {demo && <span className="demo-mode-label">DEMO MODE</span>}
+          {demo && <label className="demo-role-control"><span>Preview role</span><select value={role} aria-label="Choose demo role" onChange={(event) => router.push(`/demo/${event.target.value}`)}><option value="student">Student</option><option value="worker">Worker</option><option value="admin">Admin</option></select></label>}
+          {demo && <Link className="button button-outline demo-login-link" href="/login">Back to Login</Link>}
           <span className="emergency-chip"><span className="emergency-dot"/> Emergency <a className="emergency-number" href="tel:112">112</a></span>
-          <button className="icon-button" aria-label="Toggle color theme" onClick={() => { const next = !dark; setDark(next); localStorage.setItem("ecotwin-theme", next ? "dark" : "light"); }}>{dark ? "☼" : "◐"}</button>
-          <button className="icon-button" aria-label="Refresh campus data" onClick={() => void reload()}>↻</button>
+          <button className="icon-button" aria-label="Toggle color theme" onClick={() => { const next = !dark; setDark(next); localStorage.setItem(demo ? "ecotwin-demo-theme" : "ecotwin-theme", next ? "dark" : "light"); }}>{dark ? "☼" : "◐"}</button>
+          {!demo && <button className="icon-button" aria-label="Refresh campus data" onClick={() => void reload()}>↻</button>}
           <div className="profile-chip">
             <span className="profile-avatar">{name.split(" ").map((s) => s[0]).join("")}</span>
             <span className="profile-name">{name}<small>{role === "admin" ? "Administrator" : role === "worker" ? "Campus worker" : "Student"}</small></span>
@@ -174,12 +208,12 @@ export function AppShell({ role, identity, twinData, geometryUnavailable }: { ro
         <aside className="sidebar glass-panel" aria-label="Workspace navigation">
           <div className="workspace-switcher">
             <span className="switcher-icon">{role === "student" ? "S" : role === "worker" ? "W" : "A"}</span>
-            <span className="switcher-copy"><strong>{role === "admin" ? "Administrator" : role === "worker" ? "Campus worker" : "Student"}</strong><small>Campus workspace</small></span>
+            <span className="switcher-copy"><strong>{role === "admin" ? "Administrator" : role === "worker" ? "Campus worker" : "Student"}</strong><small>{demo ? "Demo workspace" : "Campus workspace"}</small></span>
           </div>
           <p className="nav-caption">WORKSPACE</p>
           <nav className="side-nav">
-            {navs[role].map((item, i) => navRoutes[item] ? (
-              <Link key={item} href={`/workspace/${role}/${navRoutes[item]}`} className={`nav-item ${item === "Sustainability" ? "sustainability-nav-item" : ""}`}>
+            {navs[role].map((item, i) => (navRoutes[item] || (demo && item === "Campus Digital Twin")) ? (
+              <Link key={item} href={`${routePrefix}/${item === "Campus Digital Twin" ? "twin" : navRoutes[item]}`} className={`nav-item ${active === item || (active === "Sustainability" && item === "Sustainability") ? "active" : ""}`} onClick={() => setMobileOpen(false)}>
                 <span className="nav-icon">{item === "EcoTwin Help" ? "✳" : "◌"}</span>
                 <span className="nav-label">{item}</span>
                 {item === "Notifications" && unreadNotifications > 0 && <span className="nav-count" aria-label={`${unreadNotifications} unread notifications`}>{unreadNotifications}</span>}
@@ -194,13 +228,13 @@ export function AppShell({ role, identity, twinData, geometryUnavailable }: { ro
           <div className="sidebar-spacer"/>
           <p className="nav-caption account-caption">ACCOUNT</p>
           <nav className="side-nav account-nav" aria-label="Account navigation">
-            <Link href={`/workspace/${role}/profile`} className={`nav-item ${active === "Profile" ? "active" : ""}`} onClick={() => { setActive("Profile"); setMobileOpen(false); }} title={collapsed ? "Profile" : undefined}><span className="nav-icon" aria-hidden="true">◎</span><span className="nav-label">Profile</span></Link>
-            <Link href={`/workspace/${role}/settings`} className={`nav-item ${active === "Settings" ? "active" : ""}`} onClick={() => { setActive("Settings"); setMobileOpen(false); }} title={collapsed ? "Settings" : undefined}><span className="nav-icon" aria-hidden="true">⚙</span><span className="nav-label">Settings</span></Link>
+            <Link href={`${routePrefix}/profile`} className={`nav-item ${active === "Profile" ? "active" : ""}`} onClick={() => { setActive("Profile"); setMobileOpen(false); }} title={collapsed ? "Profile" : undefined}><span className="nav-icon" aria-hidden="true">◎</span><span className="nav-label">Profile</span></Link>
+            <Link href={`${routePrefix}/settings`} className={`nav-item ${active === "Settings" ? "active" : ""}`} onClick={() => { setActive("Settings"); setMobileOpen(false); }} title={collapsed ? "Settings" : undefined}><span className="nav-icon" aria-hidden="true">⚙</span><span className="nav-label">Settings</span></Link>
           </nav>
           <div className="sidebar-bottom">
             <span className="mini-avatar">{name.split(" ").map((s) => s[0]).join("")}</span>
-            <span className="sidebar-user"><strong>{name}</strong><small>Verified campus account</small></span>
-            <button type="button" className="signout-link" onClick={() => void signOut()} aria-label="Sign out" title="Sign out">⇥</button>
+            <span className="sidebar-user"><strong>{name}</strong><small>{demo ? "Sample visitor" : "Verified campus account"}</small></span>
+            {demo ? <Link href="/login" className="signout-link" aria-label="Back to Login" title="Back to Login">⇥</Link> : <button type="button" className="signout-link" onClick={() => void signOut()} aria-label="Sign out" title="Sign out">⇥</button>}
           </div>
           <button type="button" className="collapse-button" onClick={() => { setCollapsed((value) => !value); setMobileOpen(false); }} aria-expanded={!collapsed} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} title={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
             <span className="collapse-glyph" aria-hidden="true">{collapsed ? "»" : "«"}</span>
@@ -208,15 +242,17 @@ export function AppShell({ role, identity, twinData, geometryUnavailable }: { ro
           </button>
         </aside>
         <main className="main-content">
-          <div className="breadcrumb"><span>EcoTwin</span><span>›</span><span>{role === "admin" ? "Administrator" : role === "worker" ? "Campus worker" : "Student"}</span><span>›</span><strong>{active}</strong></div>
+          <div className="breadcrumb"><span>EcoTwin</span><span>›</span><span>{role === "admin" ? "Administrator" : role === "worker" ? "Campus worker" : "Student"}</span><span>›</span><strong>{active}</strong>{demo && <span className="demo-breadcrumb-label">DEMO MODE</span>}</div>
           <div className="welcome-row">
             <div>
               <p className="eyebrow">CAMPUS OPERATIONS</p>
               <h1>{active === "Overview" ? `Good morning, ${name.split(" ")[0]}` : active}</h1>
-              <p className="muted">{active === "Overview" ? "Your campus reports and operations, connected in one place." : `${visibleIssues.length} shared issue records · updates appear across role workspaces.`}</p>
+              <p className="muted">{demo ? "Sample campus data · local preview only." : active === "Overview" ? "Your campus reports and operations, connected in one place." : `${visibleIssues.length} shared issue records · updates appear across role workspaces.`}</p>
             </div>
             <button className="button button-primary" onClick={() => setReportOpen(true)}><span>＋</span>{role === "student" ? "Report an issue" : role === "worker" ? "Open my tasks" : "Review issues"}</button>
           </div>
+
+          {demoContent ? <div className="demo-route-content">{demoContent}</div> : <>
           
           {error && <div className="auth-notice" role="alert"><span className="notice-icon">!</span><span>{error}</span><button className="text-button" onClick={() => setError("")}>Dismiss</button></div>}
           {!error && !auditLogAvailable && <div className="auth-notice" role="status"><span className="notice-icon">i</span><span>Campus reports loaded, but activity history is unavailable. Run <code>supabase/audit-log.sql</code> to enable notifications and activity history.</span></div>}
@@ -286,7 +322,7 @@ export function AppShell({ role, identity, twinData, geometryUnavailable }: { ro
                     ))}
                   </div>
                 )}
-                <div className="panel-footer-note"><span className="tiny-info">i</span> Reports and status updates come from authorized campus records.</div>
+                <div className="panel-footer-note"><span className="tiny-info">i</span> {demo ? "Sample issue records. Actions on this screen affect only the local demo view." : "Reports and status updates come from authorized campus records."}</div>
               </article>
               <article className="panel glass-panel twin-card">
                 <div className="panel-heading">
@@ -294,17 +330,17 @@ export function AppShell({ role, identity, twinData, geometryUnavailable }: { ro
                     <p className="eyebrow">CAMPUS AT A GLANCE</p>
                     <h2>Digital Twin</h2>
                   </div>
-                  <Link className="expand-button" aria-label="Open campus view" href={`/workspace/${role}/twin`}>↗</Link>
+                  <Link className="expand-button" aria-label="Open campus view" href={`${routePrefix}/twin`}>↗</Link>
                 </div>
                 <TwinPreview issues={issues}/>
-                <Link className="button button-outline button-full" href={`/workspace/${role}/twin`}>Explore interactive campus <span>→</span></Link>
+                <Link className="button button-outline button-full" href={`${routePrefix}/twin`}>Explore interactive campus <span>→</span></Link>
               </article>
             </section>
           )}
 
           {(role === "worker" || role === "admin") && (
             <>
-              <div className="auth-notice" role="status">{sensorError || "Sensor recency is shown only when device readings are available."}</div>
+              <div className="auth-notice" role="status">{demo ? "DEMO MODE · Fictional sensor examples, not live device readings." : sensorError || "Sensor recency is shown only when device readings are available."}</div>
               <section className="sensor-card-grid" aria-label="Campus sensor status">
                 {sensors.map((sensor) => (
                   <article className="panel glass-panel sensor-status-card" key={sensor.id}>
@@ -317,20 +353,22 @@ export function AppShell({ role, identity, twinData, geometryUnavailable }: { ro
             </>
           )}
 
-          <button type="button" className="button button-primary impact-link" onClick={() => router.push(`/workspace/${role}/sustainability`)}>
+          <button type="button" className="button button-primary impact-link" onClick={() => router.push(`${routePrefix}/sustainability`)}>
             View sustainability →
           </button>
 
           <footer className="workspace-footer">
             <span>EcoTwin · campus operations</span>
-            <span><a href="mailto:campus-support@example.edu">Support</a><i>·</i><Link href={`/workspace/${role}/profile`}>Profile</Link></span>
+            <span><a href="mailto:campus-support@example.edu">Support</a><i>·</i><Link href={`${routePrefix}/profile`}>Profile</Link></span>
           </footer>
+          </>}
         </main>
 
-        {assistantOpen ? <AssistantDock onClose={() => setAssistantOpen(false)} /> : <button type="button" className="assistant-reopen" onClick={() => setAssistantOpen(true)} aria-label="Open EcoTwin website help" title="Open EcoTwin Help">✳ <span>Ask EcoTwin Help</span></button>}
+        {!demo && (assistantOpen ? <AssistantDock onClose={() => setAssistantOpen(false)} /> : <button type="button" className="assistant-reopen" onClick={() => setAssistantOpen(true)} aria-label="Open EcoTwin website help" title="Open EcoTwin Help">✳ <span>Ask EcoTwin Help</span></button>)}
       </div>
 
-      {reportOpen && (
+      {reportOpen && demo && <DemoIssueReportModal onClose={() => setReportOpen(false)} onSubmit={submitDemoIssue}/>}
+      {reportOpen && !demo && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget && !reportSubmitLock.current) { setReportOpen(false); resetReportWizard(); } }}>
           <form className="report-modal glass-panel" onSubmit={reportStep === "review" ? submitReport : (e) => { e.preventDefault(); void analyzeIssuePhoto(); }}>
             <div className="panel-heading">
@@ -422,6 +460,26 @@ function Metric({ label, value, note, icon }: { label: string; value: string; no
       <span className="metric-caption">{note}</span>
     </article>
   ); 
+}
+
+function DemoIssueReportModal({ onClose, onSubmit }: { onClose: () => void; onSubmit: (values: { title: string; description: string; category: string; location: string; priority: CampusIssue["priority"] }) => void }) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [category, setCategory] = useState("Water");
+  const [location, setLocation] = useState("Library · Ground floor");
+  const [priority, setPriority] = useState<CampusIssue["priority"]>("medium");
+
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <form className="report-modal glass-panel" onSubmit={(event) => { event.preventDefault(); onSubmit({ title: title.trim(), description: description.trim(), category, location: location.trim(), priority }); }}>
+      <div className="panel-heading"><div><p className="eyebrow">DEMO MODE · LOCAL PREVIEW</p><h2>Report a sample issue</h2></div><button type="button" className="icon-button" aria-label="Close report form" onClick={onClose}>×</button></div>
+      <p className="muted">This preview stays in your current demo session. It is never sent to staff or stored in campus systems.</p>
+      <label>Short title<input required minLength={5} maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Tap is leaking near the library"/></label>
+      <label>What happened?<textarea required minLength={10} maxLength={1000} rows={4} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Describe what you observed…"/></label>
+      <div className="form-two"><label>Category<select value={category} onChange={(event) => setCategory(event.target.value)}>{["Water", "Electrical", "Waste", "Grounds", "Safety", "Other"].map((value) => <option key={value}>{value}</option>)}</select></label><label>Priority<select value={priority} onChange={(event) => setPriority(event.target.value as CampusIssue["priority"])}>{["low", "medium", "high", "urgent"].map((value) => <option key={value} value={value}>{value[0].toUpperCase() + value.slice(1)}</option>)}</select></label></div>
+      <label>Sample location<input required value={location} onChange={(event) => setLocation(event.target.value)} placeholder="Choose a sample campus location"/></label>
+      <div className="modal-actions"><button className="button button-outline" type="button" onClick={onClose}>Cancel</button><button className="button button-primary" type="submit">Add local preview →</button></div>
+    </form>
+  </div>;
 }
 
 function TwinPreview({ issues }: { issues: CampusIssue[] }) { 
